@@ -13,4 +13,15 @@ def render(request:Request,key):
         state=store.get(DB_PATH,run_id)
     else:
         state=store.save(DB_PATH,evaluate({'dataset':request.query_params.get('dataset','dirty')}))
-    return templates.TemplateResponse(request=request,name=f'{key}.html',context={'meta':META,'key':key,'state':state,'view':state['views'][key]})
+    context={'meta':META,'key':key,'state':state,'view':state['views'][key]}
+    if key=='refund' and 'point_ledger' in state:
+        from app.modules.refund.late import closing_balances, period_boundary, PERIOD_MODELS
+        official=store.balances(DB_PATH,state['manifest']['run_id']) or closing_balances(state)
+        context['late']={
+            'official':[{'member':m,'balance':b} for m,b in sorted(official.items())],
+            'closing':[{'member':m,'balance':b} for m,b in sorted(closing_balances(state).items())],
+            'posted':store.posted_refunds(DB_PATH,state['manifest']['run_id']),
+            'boundary':period_boundary(state).isoformat(),
+            'models':PERIOD_MODELS,
+        }
+    return templates.TemplateResponse(request=request,name=f'{key}.html',context=context)

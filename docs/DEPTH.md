@@ -11,6 +11,7 @@
 | M3 积分归批 | 执行并复核积分归批 | `POST /api/lots` | `app/modules/lots/rules.py` | `tests/test_lots.py` |
 | M4 消费到期 | 执行并复核消费到期 | `POST /api/consumption` | `app/modules/consumption/rules.py` | `tests/test_consumption.py` |
 | M5 退货回拨 | 执行并复核退货回拨 | `POST /api/refund` | `app/modules/refund/rules.py` | `tests/test_refund.py` |
+| M5b 跨期迟到退货 | 裁决重开上期或差额结转并入账 | `POST /api/runs/{run_id}/late-refunds` | `app/modules/refund/late.py` | `tests/test_late_refund.py` |
 | M6 余额对账 | 执行并复核余额对账 | `POST /api/reconcile` | `app/modules/reconcile/rules.py` | `tests/test_reconcile.py` |
 | M7 期末归档 | 执行并复核期末归档 | `POST /api/archive` | `app/modules/archive/rules.py` | `tests/test_archive.py` |
 
@@ -29,6 +30,17 @@
 | TRAP-11 | UTC归一 | 静默错算或证据丢失 | 以可复核规则显式处理 | `app/modules/policy/rules.py` | `tests/test_policy.py::test_utc_real` |
 | TRAP-06 | 全角积分 | 静默错算或证据丢失 | 以可复核规则显式处理 | `app/modules/policy/rules.py` | `tests/test_policy.py::test_fullwidth_points` |
 | TRAP-23 | 权益半开窗 | 静默错算或证据丢失 | 以可复核规则显式处理 | `app/modules/policy/rules.py` | `tests/test_policy.py::test_rule_end_exclusive` |
+| TRAP-24 | 关账后迟到退货 | 直接改上期余额或让过期积分复活 | 可核对且仍可消费才重开上期，否则差额结转；先对账通过再换正式余额 | `app/modules/refund/late.py` | `tests/test_late_refund.py` |
+| TRAP-25 | 同一退货单重试 | 重复记账、余额虚增 | 按退货单号幂等重放，同号不同内容409 | `app/modules/refund/late.py` | `tests/test_late_refund.py::test_retry_does_not_double_post` |
+
+## 跨期退货冲销裁决
+
+- 处理方式只有两种：`重开上期`（可追溯原消费且回拨批次仍可消费）与 `差额结转`（原批次已过期或额度不足）。裁决证据保存在每笔结果的 `decision.reason/detail`。
+- 退货必须追溯到同会员原消费；原消费中已过期的积分记入 `expired_refund`（过期损失），未过期部分才回到 `restored`（当前可用）。
+- 正式余额切换：候选余额先过 `reconcile`（积分守恒、分配明细、非负、不超发），通过才写入 `official_balances`；失败返回 409 并保留旧余额。
+- 幂等：同一 `run_id + 退货单号` 重复提交返回已存记录，`applied=false`、`delta=0`；同号不同内容返回 409 `REFUND_CONFLICT`。
+- 追溯：每笔结果 `trace` 带 `refund_id → spend_id → allocations`；退货页面显示本笔差额、过期损失、当前余额。
+
 
 ## 对账规则
 
